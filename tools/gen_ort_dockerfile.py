@@ -26,6 +26,16 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import argparse
+import platform
+
+FLAGS = None
+
+
+def target_platform():
+    if FLAGS.target_platform is not None:
+        return FLAGS.target_platform
+    return platform.system().lower()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -42,16 +52,31 @@ if __name__ == '__main__':
                         type=str,
                         required=True,
                         help='File to write Dockerfile to.')
-    parser.add_argument('--ort-openvino',
-                        type=str,
-                        required=False,
-                        help='Enable OpenVino execution provider using specified OpenVINO version.')
+    parser.add_argument(
+        '--target-platform',
+        required=False,
+        default=None,
+        help=
+        'Target for build, can be "ubuntu", "windows" or "jetpack". If not specified, build targets the current platform.'
+    )
+    parser.add_argument(
+        '--ort-openvino',
+        type=str,
+        required=False,
+        help=
+        'Enable OpenVino execution provider using specified OpenVINO version.')
     parser.add_argument('--ort-tensorrt',
                         action="store_true",
                         required=False,
                         help='Enable TensorRT execution provider.')
 
     FLAGS = parser.parse_args()
+
+    # OpenVINO EP not supported for windows build
+    if target_platform() == 'windows':
+        if FLAGS.ort_openvino is not None:
+            print("warning: OpenVINO not supported for windows, ignoring")
+            FLAGS.ort_openvino = None
 
     df = '''
 ARG BASE_IMAGE={}
@@ -63,10 +88,17 @@ ARG ONNXRUNTIME_REPO=https://github.com/microsoft/onnxruntime
         df += '''
 ARG ONNXRUNTIME_OPENVINO_VERSION={}
 '''.format(FLAGS.ort_openvino)
-        
+
     df += '''
 FROM ${BASE_IMAGE}
-
+'''
+    
+    if target_platform() == 'windows':
+        df += '''
+SHELL ["cmd", "/S", "/C"]
+'''
+    else:
+        df += '''
 # Ensure apt-get won't prompt for selecting options
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -137,6 +169,13 @@ RUN wget ${INTEL_COMPUTE_RUNTIME_URL}/intel-gmmlib_19.3.2_amd64.deb && \
         ep_flags += " --tensorrt_home /usr/src/tensorrt --use_tensorrt"
     if FLAGS.ort_openvino is not None:
         ep_flags += " --use_openvino CPU_FP32"
+
+    if target_platform() == 'windows':
+        ort_version_var = '%ONNXRUNTIME_VERSION%'
+        ort_repo_var = '%ONNXRUNTIME_REPO%'
+    else:
+        ort_version_var = '${ONNXRUNTIME_VERSION}'
+        ort_repo_var = '${ONNXRUNTIME_REPO}'
         
     df += '''
 #
@@ -144,15 +183,20 @@ RUN wget ${INTEL_COMPUTE_RUNTIME_URL}/intel-gmmlib_19.3.2_amd64.deb && \
 #
 ARG ONNXRUNTIME_VERSION
 ARG ONNXRUNTIME_REPO
-RUN git clone -b rel-${{ONNXRUNTIME_VERSION}} --recursive ${{ONNXRUNTIME_REPO}} onnxruntime && \
+RUN git clone -b rel-{} --recursive {} onnxruntime && \
     (cd onnxruntime && git submodule update --init --recursive)
-
+'''.format(ort_version_var, ort_repo_var)
+    
+    if target_platform() != 'windows':
+        df += '''
 # Need to patch until https://github.com/onnx/onnx-tensorrt/pull/568
 # is merged and used in ORT
 COPY tools/onnx_tensorrt.patch /tmp/onnx_tensorrt.patch
 RUN cd /workspace/onnxruntime/cmake/external/onnx-tensorrt && \
     patch -i /tmp/onnx_tensorrt.patch builtin_op_importers.cpp
+'''
 
+    df += '''
 ARG COMMON_BUILD_ARGS="--skip_submodule_sync --parallel --build_shared_lib --use_openmp"
 RUN mkdir -p /workspace/build
 RUN python3 /workspace/onnxruntime/tools/ci_build/build.py --build_dir /workspace/build \
@@ -187,10 +231,10 @@ RUN mkdir -p /opt/onnxruntime/include && \
        /opt/onnxruntime/include
 
 RUN mkdir -p /opt/onnxruntime/lib && \
-    cp /workspace/build/Release/libonnxruntime.so.${ONNXRUNTIME_VERSION} \
+    cp /workspace/build/Release/libonnxruntime.so.{} \
        /opt/onnxruntime/lib && \
     (cd /opt/onnxruntime/lib && \
-     ln -sf libonnxruntime.so.${ONNXRUNTIME_VERSION} libonnxruntime.so)
+     ln -sf libonnxruntime.so.{} libonnxruntime.so)
 
 RUN mkdir -p /opt/onnxruntime/bin && \
     cp /workspace/build/Release/onnxruntime_perf_test \
@@ -198,7 +242,7 @@ RUN mkdir -p /opt/onnxruntime/bin && \
     cp /workspace/build/Release/onnx_test_runner \
        /opt/onnxruntime/bin && \
     (cd /opt/onnxruntime/bin && chmod a+x *)
-'''
+'''.format(ort_version_var, ort_version_var)
 
     if FLAGS.ort_tensorrt:
         df += '''
@@ -245,7 +289,8 @@ RUN cp /workspace/build/Release/libonnxruntime_providers_shared.so \
      ln -sf libtbb.so.2 libtbb.so)
 '''
 
-    df += '''
+    if target_platform() != 'windows':
+        df += '''
 RUN cd /opt/onnxruntime/lib && \
     for i in `find . -mindepth 1 -maxdepth 1 -type f -name '*\.so*'`; do \
         patchelf --set-rpath '$ORIGIN' $i; \
@@ -258,6 +303,6 @@ RUN mkdir -p /opt/onnxruntime/test && \
     cp /workspace/build/Release/testdata/custom_op_library/custom_op_test.onnx \
        /opt/onnxruntime/test
 '''
-    
+
     with open(FLAGS.output, "w") as dfile:
         dfile.write(df)

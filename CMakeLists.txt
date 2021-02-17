@@ -40,9 +40,11 @@ project(tritononnxruntimebackend LANGUAGES C CXX)
 #   or:
 #
 #   - Set TRITON_BUILD_ONNXRUNTIME_VERSION to the version of ONNX
-#     Runtime that you want to be built for the backend. Set
-#     TRITON_BUILD_CONTAINER_VERSION to the Triton container version
-#     that you want to target with the build.
+#     Runtime that you want to be built for the backend.
+#   - Set TRITON_BUILD_CONTAINER to the Triton container to use as a
+#     base for the build. On linux you can instead set
+#     TRITON_BUILD_CONTAINER_VERSION to the Triton version that you
+#     want to target with the build.
 #   - If you want TensorRT support set
 #     TRITON_ENABLE_ONNXRUNTIME_TENSORRT=ON.
 #   - If you want OpenVINO support set
@@ -57,7 +59,8 @@ option(TRITON_ENABLE_ONNXRUNTIME_TENSORRT
   "Enable TensorRT execution provider for ONNXRuntime backend in server" OFF)
 option(TRITON_ENABLE_ONNXRUNTIME_OPENVINO
   "Enable OpenVINO execution provider for ONNXRuntime backend in server" OFF)
-set(TRITON_BUILD_CONTAINER_VERSION "" CACHE STRING "Triton container version to build for")
+set(TRITON_BUILD_CONTAINER "" CACHE STRING "Triton container to use a base for build")
+set(TRITON_BUILD_CONTAINER_VERSION "" CACHE STRING "Triton container version to target")
 set(TRITON_BUILD_ONNXRUNTIME_VERSION "" CACHE STRING "ONNXRuntime version to build")
 set(TRITON_BUILD_ONNXRUNTIME_OPENVINO_VERSION "" CACHE STRING "ONNXRuntime OpenVINO version to build")
 set(TRITON_ONNXRUNTIME_INCLUDE_PATHS "" CACHE PATH "Paths to ONNXRuntime includes")
@@ -82,10 +85,15 @@ if("${TRITON_BUILD_ONNXRUNTIME_VERSION}" STREQUAL "")
 
 else()
 
-  if(NOT TRITON_BUILD_CONTAINER_VERSION)
-    message(FATAL_ERROR "TRITON_BUILD_ONNXRUNTIME_VERSION requires TRITON_BUILD_CONTAINER_VERSION")
+  if(NOT TRITON_BUILD_CONTAINER AND NOT TRITON_BUILD_CONTAINER_VERSION)
+    message(FATAL_ERROR
+      "TRITON_BUILD_ONNXRUNTIME_VERSION requires TRITON_BUILD_CONTAINER or TRITON_BUILD_CONTAINER_VERSION")
   endif()
 
+  if(NOT TRITON_BUILD_CONTAINER)
+    set(TRITON_BUILD_CONTAINER "nvcr.io/nvidia/tritonserver:${TRITON_BUILD_CONTAINER_VERSION}-py3-min")
+  endif()
+  
   set(TRITON_ONNXRUNTIME_INCLUDE_PATHS "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime/include")
   set(TRITON_ONNXRUNTIME_LIB_PATHS "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime/lib")
   set(TRITON_ONNXRUNTIME_DOCKER_IMAGE "tritonserver_onnxruntime")
@@ -255,8 +263,8 @@ if(NOT ("${TRITON_BUILD_ONNXRUNTIME_VERSION}" STREQUAL ""))
   add_custom_command(
     OUTPUT
       onnxruntime/lib/${ONNXRUNTIME_LIBRARY}
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_ort_dockerfile.py --triton-container="nvcr.io/nvidia/tritonserver:${TRITON_BUILD_CONTAINER_VERSION}-py3-min" --ort-version="${TRITON_BUILD_ONNXRUNTIME_VERSION}" ${_GEN_FLAGS} --output=Dockerfile.ort
-    COMMAND docker build --cache-from=tritonserver_onnxruntime --cache-from=tritonserver_onnxruntime_cache0 --cache-from=tritonserver_onnxruntime_cache1 -t ${TRITON_ONNXRUNTIME_DOCKER_IMAGE} -f ./Dockerfile.ort ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_ort_dockerfile.py --triton-container="${TRITON_BUILD_CONTAINER}" --ort-version="${TRITON_BUILD_ONNXRUNTIME_VERSION}" ${_GEN_FLAGS} --output=Dockerfile.ort
+    COMMAND docker build --cache-from=${TRITON_ONNXRUNTIME_DOCKER_IMAGE} --cache-from=${TRITON_ONNXRUNTIME_DOCKER_IMAGE}_cache0 --cache-from=${TRITON_ONNXRUNTIME_DOCKER_IMAGE}_cache1 -t ${TRITON_ONNXRUNTIME_DOCKER_IMAGE} -f ./Dockerfile.ort ${CMAKE_CURRENT_SOURCE_DIR}
     COMMAND docker rm onnxruntime_backend_ort || echo "error ignored..." || true
     COMMAND docker create --name onnxruntime_backend_ort ${TRITON_ONNXRUNTIME_DOCKER_IMAGE}
     COMMAND rm -fr onnxruntime
