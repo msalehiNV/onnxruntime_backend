@@ -69,8 +69,23 @@ if __name__ == '__main__':
                         action="store_true",
                         required=False,
                         help='Enable TensorRT execution provider.')
+    parser.add_argument('--cuda-home',
+                        type=str,
+                        required=False,
+                        help='Home directory for CUDA.')
+    parser.add_argument('--tensorrt-home',
+                        type=str,
+                        required=False,
+                        help='Home directory for TensorRT.')
 
     FLAGS = parser.parse_args()
+
+    # Set some default values based on platform. On windows we expect
+    # CUDA_HOME to be set so we don't have a default for --cuda-home
+    if FLAGS.cuda_home is None:
+        FLAGS.cuda_home = None if target_platform() == 'windows' else '/usr/local/cuda'
+    if FLAGS.tensorrt_home is None:
+        FLAGS.tensorrt_home = '/tensorrt' if target_platform() == 'windows' else '/usr/src/tensorrt'
 
     # OpenVINO EP not supported for windows build
     if target_platform() == 'windows':
@@ -84,6 +99,16 @@ ARG ONNXRUNTIME_VERSION={}
 ARG ONNXRUNTIME_REPO=https://github.com/microsoft/onnxruntime
 '''.format(FLAGS.triton_container, FLAGS.ort_version)
 
+    if FLAGS.cuda_home is not None:
+        df += '''
+ARG CUDA_HOME="{}"
+'''.format(FLAGS.cuda_home)
+
+    if FLAGS.tensorrt_home is not None:
+        df += '''
+ARG TENSORRT_HOME="{}"
+'''.format(FLAGS.tensorrt_home)
+
     if FLAGS.ort_openvino is not None:
         df += '''
 ARG ONNXRUNTIME_OPENVINO_VERSION={}
@@ -91,8 +116,9 @@ ARG ONNXRUNTIME_OPENVINO_VERSION={}
 
     df += '''
 FROM ${BASE_IMAGE}
+WORKDIR /workspace
 '''
-    
+
     if target_platform() == 'windows':
         df += '''
 SHELL ["cmd", "/S", "/C"]
@@ -101,8 +127,6 @@ SHELL ["cmd", "/S", "/C"]
         df += '''
 # Ensure apt-get won't prompt for selecting options
 ENV DEBIAN_FRONTEND=noninteractive
-
-WORKDIR /workspace
 
 # The Onnx Runtime dockerfile is the collection of steps in
 # https://github.com/microsoft/onnxruntime/tree/master/dockerfiles
@@ -164,29 +188,31 @@ RUN wget ${INTEL_COMPUTE_RUNTIME_URL}/intel-gmmlib_19.3.2_amd64.deb && \
     dpkg -i *.deb && rm -rf *.deb
 '''
 
-    ep_flags = ""
-    if FLAGS.ort_tensorrt:
-        ep_flags += " --tensorrt_home /usr/src/tensorrt --use_tensorrt"
-    if FLAGS.ort_openvino is not None:
-        ep_flags += " --use_openvino CPU_FP32"
-
     if target_platform() == 'windows':
+        ort_build_script = './build.bat'
         ort_version_var = '%ONNXRUNTIME_VERSION%'
         ort_repo_var = '%ONNXRUNTIME_REPO%'
+        cuda_home_var = None if FLAGS.cuda_home is None else '%CUDA_HOME%'
+        tensorrt_home_var = None if FLAGS.tensorrt_home is None else '%TENSORRT_HOME%'
     else:
+        ort_build_script = './build.sh'
         ort_version_var = '${ONNXRUNTIME_VERSION}'
         ort_repo_var = '${ONNXRUNTIME_REPO}'
-        
+        cuda_home_var = None if FLAGS.cuda_home is None else '${CUDA_HOME}'
+        tensorrt_home_var = None if FLAGS.tensorrt_home is None else '${TENSORRT_HOME}'
+
     df += '''
 #
 # ONNX Runtime build
 #
 ARG ONNXRUNTIME_VERSION
 ARG ONNXRUNTIME_REPO
+ARG CUDA_HOME
+ARG TENSORRT_HOME
 RUN git clone -b rel-{} --recursive {} onnxruntime && \
     (cd onnxruntime && git submodule update --init --recursive)
 '''.format(ort_version_var, ort_repo_var)
-    
+
     if target_platform() != 'windows':
         df += '''
 # Need to patch until https://github.com/onnx/onnx-tensorrt/pull/568
@@ -196,18 +222,20 @@ RUN cd /workspace/onnxruntime/cmake/external/onnx-tensorrt && \
     patch -i /tmp/onnx_tensorrt.patch builtin_op_importers.cpp
 '''
 
+    ep_flags = "--use_cuda"
+    if cuda_home_var is not None:
+        ep_flags += " --cuda_home {}".format(cuda_home_var)
+    if FLAGS.ort_tensorrt:
+        ep_flags += " --tensorrt_home {} --use_tensorrt".format(tensorrt_home_var)
+    if FLAGS.ort_openvino is not None:
+        ep_flags += " --use_openvino CPU_FP32"
+
     df += '''
 ARG COMMON_BUILD_ARGS="--skip_submodule_sync --parallel --build_shared_lib --use_openmp"
-RUN mkdir -p /workspace/build
-RUN python3 /workspace/onnxruntime/tools/ci_build/build.py --build_dir /workspace/build \
-            --config Release $COMMON_BUILD_ARGS \
-            --cmake_extra_defines ONNXRUNTIME_VERSION=$(cat /workspace/onnxruntime/VERSION_NUMBER) \
-            --cuda_home /usr/local/cuda \
-            --cudnn_home /usr/local/cudnn-$(echo $CUDNN_VERSION | cut -d. -f1-2)/cuda \
-            --use_cuda \
-            --update \
-            --build {}
-'''.format(ep_flags)
+RUN {} --config Release $COMMON_BUILD_ARGS \
+       --update \
+       --build {}
+'''.format(ort_build_script, ep_flags)
 
     df += '''
 #
