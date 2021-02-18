@@ -191,7 +191,7 @@ RUN wget ${INTEL_COMPUTE_RUNTIME_URL}/intel-gmmlib_19.3.2_amd64.deb && \
 '''
 
     if target_platform() == 'windows':
-        ort_build_script = './build.bat'
+        ort_build_script = 'build.bat'
         ort_version_var = '%ONNXRUNTIME_VERSION%'
         ort_repo_var = '%ONNXRUNTIME_REPO%'
         cuda_home_var = None if FLAGS.cuda_home is None else '%CUDA_HOME%'
