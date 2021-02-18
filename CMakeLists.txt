@@ -46,7 +46,8 @@ project(tritononnxruntimebackend LANGUAGES C CXX)
 #     TRITON_BUILD_CONTAINER_VERSION to the Triton version that you
 #     want to target with the build.
 #   - If you want TensorRT support set
-#     TRITON_ENABLE_ONNXRUNTIME_TENSORRT=ON.
+#     TRITON_ENABLE_ONNXRUNTIME_TENSORRT=ON and set
+#     TRITON_BUILD_TENSORRT_HOME.
 #   - If you want OpenVINO support set
 #     TRITON_ENABLE_ONNXRUNTIME_OPENVINO=ON and set
 #     TRITON_BUILD_ONNXRUNTIME_OPENVINO_VERSION to the OpenVino
@@ -63,6 +64,8 @@ set(TRITON_BUILD_CONTAINER "" CACHE STRING "Triton container to use a base for b
 set(TRITON_BUILD_CONTAINER_VERSION "" CACHE STRING "Triton container version to target")
 set(TRITON_BUILD_ONNXRUNTIME_VERSION "" CACHE STRING "ONNXRuntime version to build")
 set(TRITON_BUILD_ONNXRUNTIME_OPENVINO_VERSION "" CACHE STRING "ONNXRuntime OpenVINO version to build")
+set(TRITON_BUILD_CUDA_HOME "" CACHE PATH "Path to CUDA install")
+set(TRITON_BUILD_TENSORRT_HOME "" CACHE PATH "Path to TensorRT install")
 set(TRITON_ONNXRUNTIME_INCLUDE_PATHS "" CACHE PATH "Paths to ONNXRuntime includes")
 set(TRITON_ONNXRUNTIME_LIB_PATHS "" CACHE PATH "Paths to ONNXRuntime libraries")
 
@@ -93,7 +96,7 @@ else()
   if(NOT TRITON_BUILD_CONTAINER)
     set(TRITON_BUILD_CONTAINER "nvcr.io/nvidia/tritonserver:${TRITON_BUILD_CONTAINER_VERSION}-py3-min")
   endif()
-  
+
   set(TRITON_ONNXRUNTIME_INCLUDE_PATHS "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime/include")
   set(TRITON_ONNXRUNTIME_LIB_PATHS "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime/lib")
   set(TRITON_ONNXRUNTIME_DOCKER_IMAGE "tritonserver_onnxruntime")
@@ -254,6 +257,12 @@ endif() # TRITON_ENABLE_ONNXRUNTIME_OPENVINO
 #
 if(NOT ("${TRITON_BUILD_ONNXRUNTIME_VERSION}" STREQUAL ""))
   set(_GEN_FLAGS "")
+  if(${TRITON_BUILD_CUDA_HOME})
+    set(_GEN_FLAGS ${_GEN_FLAGS} "--cuda-home=${TRITON_BUILD_CUDA_HOME}")
+  endif() # TRITON_BUILD_CUDA_HOME
+  if(${TRITON_BUILD_TENSORRT_HOME})
+    set(_GEN_FLAGS ${_GEN_FLAGS} "--tensorrt-home=${TRITON_BUILD_TENSORRT_HOME}")
+  endif() # TRITON_BUILD_TENSORRT_HOME
   if(${TRITON_ENABLE_ONNXRUNTIME_TENSORRT})
     set(_GEN_FLAGS ${_GEN_FLAGS} "--ort-tensorrt")
   endif() # TRITON_ENABLE_ONNXRUNTIME_TENSORRT

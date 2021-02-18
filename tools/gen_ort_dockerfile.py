@@ -83,9 +83,11 @@ if __name__ == '__main__':
     # Set some default values based on platform. On windows we expect
     # CUDA_HOME to be set so we don't have a default for --cuda-home
     if FLAGS.cuda_home is None:
-        FLAGS.cuda_home = None if target_platform() == 'windows' else '/usr/local/cuda'
+        FLAGS.cuda_home = None if target_platform(
+        ) == 'windows' else '/usr/local/cuda'
     if FLAGS.tensorrt_home is None:
-        FLAGS.tensorrt_home = '/tensorrt' if target_platform() == 'windows' else '/usr/src/tensorrt'
+        FLAGS.tensorrt_home = '/tensorrt' if target_platform(
+        ) == 'windows' else '/usr/src/tensorrt'
 
     # OpenVINO EP not supported for windows build
     if target_platform() == 'windows':
@@ -226,7 +228,8 @@ RUN cd /workspace/onnxruntime/cmake/external/onnx-tensorrt && \
     if cuda_home_var is not None:
         ep_flags += " --cuda_home {}".format(cuda_home_var)
     if FLAGS.ort_tensorrt:
-        ep_flags += " --tensorrt_home {} --use_tensorrt".format(tensorrt_home_var)
+        ep_flags += " --tensorrt_home {} --use_tensorrt".format(
+            tensorrt_home_var)
     if FLAGS.ort_openvino is not None:
         ep_flags += " --use_openvino CPU_FP32"
 
